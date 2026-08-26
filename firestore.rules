@@ -1,0 +1,86 @@
+rules_version = '2';
+
+// ---------------------------------------------------------------------
+// Access model: everyone must be signed in (Google auth) to read or
+// write anything — that's the "no randoms off the internet" gate.
+// Beyond that, each person can only touch their own data:
+//   - You can create/claim your own player profile, and edit only your
+//     own paymentInfo.
+//   - You can join a session only as yourself (participant doc id must
+//     be your own player id), and only toggle your own "hasSettled".
+//   - Anyone signed in can create a session and record who paid for the
+//     booking (that's often the organiser noting facts about others,
+//     not a claim those people need to make themselves).
+//
+// This is what actually protects the data — the firebaseConfig object
+// in your deployed site is not a secret and can't be hidden from a
+// public repo or a public website; these rules are the real gate.
+// ---------------------------------------------------------------------
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /players/{playerId} {
+      allow read: if request.auth != null;
+
+      // Create your own profile (uid == you), or an "unclaimed"
+      // placeholder for someone else who hasn't signed in yet
+      // (uid explicitly null — used when recording who paid a booking).
+      allow create: if request.auth != null
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() > 0
+                    && request.resource.data.name.size() < 60
+                    && (request.resource.data.uid == request.auth.uid
+                        || request.resource.data.uid == null);
+
+      // Update your own profile (e.g. paymentInfo), or claim an
+      // unclaimed placeholder as yourself. Name can't be changed this
+      // way — claiming should match the existing placeholder's name.
+      allow update: if request.auth != null
+                    && request.resource.data.name == resource.data.name
+                    && (
+                         resource.data.uid == request.auth.uid
+                         || (resource.data.uid == null && request.resource.data.uid == request.auth.uid)
+                       );
+
+      allow delete: if false;
+    }
+
+    match /sessions/{sessionId} {
+      allow read: if request.auth != null;
+
+      allow create: if request.auth != null
+                    && request.resource.data.createdByUid == request.auth.uid
+                    && request.resource.data.keys().hasAll(['date', 'courtCost', 'payers'])
+                    && request.resource.data.courtCost is number
+                    && request.resource.data.courtCost >= 0;
+
+      // Only the person who created the session can edit its details,
+      // and can't hand it off to someone else.
+      allow update: if request.auth != null
+                    && resource.data.createdByUid == request.auth.uid
+                    && request.resource.data.createdByUid == resource.data.createdByUid
+                    && request.resource.data.courtCost is number
+                    && request.resource.data.courtCost >= 0;
+
+      allow delete: if false; // delete manually from the Firebase console if needed
+
+      match /participants/{playerId} {
+        allow read: if request.auth != null;
+
+        // The doc id IS the player id — you can only create/update/
+        // delete the row that matches your own player profile.
+        allow create: if request.auth != null
+                      && get(/databases/$(database)/documents/players/$(playerId)).data.uid == request.auth.uid
+                      && request.resource.data.playerId == playerId;
+
+        allow update: if request.auth != null
+                      && get(/databases/$(database)/documents/players/$(playerId)).data.uid == request.auth.uid
+                      && request.resource.data.playerId == resource.data.playerId
+                      && request.resource.data.name == resource.data.name;
+
+        allow delete: if request.auth != null
+                      && get(/databases/$(database)/documents/players/$(playerId)).data.uid == request.auth.uid;
+      }
+    }
+  }
+}

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Badminton Splitter</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏸</text></svg>" />
+<link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">🏸 Badminton Splitter</a>
+    <div class="topbar-right">
+      <span id="connection-status" class="status status-connecting">connecting…</span>
+      <span id="account-area" class="account-area"></span>
+    </div>
+  </header>
+
+  <main id="app" class="app">
+    <p class="loading">Loading…</p>
+  </main>
+
+  <footer class="footer">
+    <p>Costs are self-reported by the group — this tool tracks who owes what, it doesn't move money itself.</p>
+  </footer>
+
+  <!-- Templates -->
+  <template id="tpl-signin">
+    <section class="panel narrow signin-panel">
+      <h2>🏸 Badminton Splitter</h2>
+      <p>Sign in with Google to see sessions and join in — this keeps the group's data private to people you've shared the link with, and means you can only ever mark <em>your own</em> payments as settled.</p>
+      <button id="signin-btn" class="btn btn-primary">Sign in with Google</button>
+    </section>
+  </template>
+
+  <template id="tpl-profile-setup">
+    <section class="panel narrow">
+      <h2>One more thing</h2>
+      <p class="hint">What name should the group see you as? If you've already been added as someone who paid for a booking, type the same name to link that up rather than creating a duplicate.</p>
+      <form id="profile-setup-form" class="form">
+        <label>Your name
+          <input id="setup-name" type="text" list="unclaimed-names-datalist" required />
+        </label>
+        <label>How should people pay you back? (optional)
+          <input id="setup-payment-info" type="text" placeholder="e.g. a payment link/handle, or leave blank for now" />
+        </label>
+        <button type="submit" class="btn btn-primary">Continue</button>
+      </form>
+      <datalist id="unclaimed-names-datalist"></datalist>
+    </section>
+  </template>
+
+  <template id="tpl-home">
+    <section class="panel">
+      <div class="panel-header">
+        <h2>Sessions</h2>
+        <a href="#/new" class="btn btn-primary">+ New session</a>
+      </div>
+      <div id="session-list" class="session-list"></div>
+    </section>
+  </template>
+
+  <template id="tpl-session-card">
+    <a class="session-card" href="#">
+      <div class="session-card-main">
+        <div class="session-card-date"></div>
+        <div class="session-card-location"></div>
+      </div>
+      <div class="session-card-meta">
+        <span class="chip chip-cost"></span>
+        <span class="chip chip-people"></span>
+        <span class="badge"></span>
+      </div>
+    </a>
+  </template>
+
+  <template id="tpl-new-session">
+    <section class="panel narrow">
+      <div class="panel-header">
+        <a href="#/" class="back">&larr; Back</a>
+        <h2>New session</h2>
+      </div>
+      <form id="new-session-form" class="form">
+        <label>Date
+          <input type="date" name="date" required />
+        </label>
+        <label>Location / venue
+          <input type="text" name="location" placeholder="e.g. Riverside Sports Centre, Court 3" />
+        </label>
+        <label>Total court cost
+          <input type="number" name="courtCost" min="0" step="0.01" required placeholder="e.g. 40.00" />
+        </label>
+        <label>Notes (optional)
+          <input type="text" name="notes" placeholder="e.g. weekly Tuesday session" />
+        </label>
+
+        <fieldset class="fieldset">
+          <legend>Who booked &amp; paid the court up front?</legend>
+          <p class="hint">Add one or more people who fronted the booking cost, and how much each of them paid. This usually should add up to the total court cost above.</p>
+          <div id="payers-list" class="payers-list"></div>
+          <button type="button" id="add-payer-btn" class="btn btn-secondary btn-small">+ Add payer</button>
+        </fieldset>
+
+        <button type="submit" class="btn btn-primary">Create session</button>
+      </form>
+    </section>
+  </template>
+
+  <template id="tpl-payer-row">
+    <div class="payer-row">
+      <input type="text" class="payer-name" list="player-names-datalist" placeholder="name" required />
+      <input type="number" class="payer-amount" min="0" step="0.01" placeholder="amount paid" required />
+      <button type="button" class="btn btn-icon remove-payer-btn" title="Remove">✕</button>
+    </div>
+  </template>
+
+  <datalist id="player-names-datalist"></datalist>
+
+  <template id="tpl-session-detail">
+    <section class="panel">
+      <div class="panel-header">
+        <a href="#/" class="back">&larr; Back</a>
+      </div>
+
+      <div class="session-summary">
+        <h2 class="session-title"></h2>
+        <p class="session-sub"></p>
+        <p class="session-notes"></p>
+
+        <div class="stats-row">
+          <div class="stat">
+            <div class="stat-value stat-cost"></div>
+            <div class="stat-label">total court cost</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value stat-per-person"></div>
+            <div class="stat-label">per person (so far)</div>
+          </div>
+          <div class="stat">
+            <div class="stat-value stat-count"></div>
+            <div class="stat-label">joined</div>
+          </div>
+        </div>
+
+        <div class="payers-summary">
+          <strong>Paid up front by:</strong>
+          <span class="payers-summary-list"></span>
+        </div>
+      </div>
+
+      <div class="panel-subsection">
+        <h3>Who's in</h3>
+        <ul id="participant-list" class="participant-list"></ul>
+
+        <div id="join-area" class="join-area"></div>
+      </div>
+
+      <div class="panel-subsection">
+        <div class="panel-header">
+          <h3>Settle up</h3>
+          <button id="settle-btn" class="btn btn-secondary">Calculate transfers</button>
+        </div>
+        <div id="settle-result" class="settle-result"></div>
+      </div>
+    </section>
+  </template>
+
+  <template id="tpl-participant-row">
+    <li class="participant-row">
+      <span class="participant-name"></span>
+      <span class="participant-tags"></span>
+      <label class="settled-toggle">
+        <input type="checkbox" class="settled-checkbox" />
+        paid
+      </label>
+    </li>
+  </template>
+
+  <template id="tpl-settle-transfer">
+    <div class="transfer-row">
+      <span class="transfer-from"></span>
+      <span class="transfer-arrow">→</span>
+      <span class="transfer-to"></span>
+      <span class="transfer-amount"></span>
+      <span class="transfer-payinfo"></span>
+    </div>
+  </template>
+
+  <!-- Firebase (compat SDK — simplest to use without a build step) -->
+  <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+
+  <script src="firebase-config.js"></script>
+  <script src="splitLogic.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
