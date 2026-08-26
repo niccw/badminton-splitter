@@ -148,6 +148,49 @@ check("cost per person recomputes to £11.11 (100 / 9) after withdrawing",
 await page.waitForSelector("#join-btn", { timeout: 5000 });
 check("the Join button reappears after withdrawing", true);
 
+// Cancel the session (I'm the creator): confirm dialog, banner appears,
+// join is blocked, and the home list badge reflects it.
+page.once("dialog", (dialog) => dialog.accept());
+await page.click("#session-toggle-btn");
+await page.waitForSelector("#cancelled-banner:not([hidden])", { timeout: 5000 });
+check("cancelled banner shows after cancelling", true);
+check("join area explains the session is cancelled instead of offering to join",
+  (await page.textContent("#join-area")).includes("cancelled"));
+
+await page.goto("http://localhost:8981/index.html#/");
+await page.waitForSelector(".badge-cancelled", { timeout: 5000 });
+check("home list shows a 'cancelled' badge for the cancelled session", (await page.textContent(".badge-cancelled")).includes("cancelled"));
+
+// Reopen it: banner clears and joining works again.
+await page.goto("http://localhost:8981/index.html#/session/" + encodeURIComponent(sessionId));
+await page.waitForSelector("#session-toggle-btn", { timeout: 5000 });
+await page.click("#session-toggle-btn");
+await page.waitForFunction(() => document.getElementById("cancelled-banner").hidden === true, { timeout: 5000 });
+check("cancelled banner clears after reopening", true);
+await page.waitForSelector("#join-btn", { timeout: 5000 });
+check("Join button is offered again after reopening", true);
+
+// Edit the session (I'm the creator): form prefills with existing
+// values, and saving updates the doc in place rather than creating a
+// new one.
+await page.click("#edit-session-link");
+await page.waitForSelector("#new-session-form", { timeout: 5000 });
+check("edit form heading says 'Edit session'", (await page.textContent(".panel-header h2")) === "Edit session");
+check("edit form prefills the existing location", await page.inputValue('[name="location"]') === "Test Sports Centre");
+check("edit form prefills the existing court cost", await page.inputValue('[name="courtCost"]') === "100");
+check("edit form prefills both existing payer rows", (await page.locator(".payer-row").count()) === 2);
+
+await page.fill('[name="location"]', "Updated Sports Centre");
+await page.fill('[name="courtCost"]', "120");
+await page.click('#new-session-form button[type="submit"]');
+
+await page.waitForFunction(() => document.querySelector(".session-sub")?.textContent === "Updated Sports Centre", { timeout: 5000 });
+check("session detail reflects the edited location", true);
+check("editing didn't create a second session (URL still points at the same id)",
+  decodeURIComponent(page.url().split("#/session/")[1]) === sessionId);
+check("cost per person recomputes from the edited court cost (£120 / 9 = £13.33)",
+  (await page.textContent(".stat-per-person")).includes("13.33"));
+
 // Editing payment info via the header control (native prompt dialog).
 page.once("dialog", (dialog) => dialog.accept("new-handle@example"));
 await page.click("#edit-payinfo-btn");

@@ -179,6 +179,7 @@ a:hover { text-decoration: underline; }
   color: var(--primary-dark);
   font-weight: 600;
 }
+.badge-cancelled { background: var(--border); color: var(--muted); }
 
 .form { display: flex; flex-direction: column; gap: 14px; }
 .form label {
@@ -289,6 +290,18 @@ a:hover { text-decoration: underline; }
   color: var(--muted);
   font-size: 0.78rem;
   padding: 20px;
+}
+
+.session-actions { display: flex; align-items: center; gap: 8px; }
+
+.cancelled-banner {
+  background: var(--border);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 0.9rem;
+  font-weight: 600;
 }
 
 .error-banner {

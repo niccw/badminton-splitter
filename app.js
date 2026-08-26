@@ -320,8 +320,12 @@
     } else if (hash === "#/new") {
       renderNewSession();
     } else if (hash.indexOf("#/session/") === 0) {
-      const id = decodeURIComponent(hash.slice("#/session/".length));
-      renderSessionDetail(id);
+      const rest = hash.slice("#/session/".length);
+      if (rest.slice(-"/edit".length) === "/edit") {
+        renderEditSession(decodeURIComponent(rest.slice(0, -"/edit".length)));
+      } else {
+        renderSessionDetail(decodeURIComponent(rest));
+      }
     } else {
       renderHome();
     }
@@ -417,46 +421,99 @@
     const participantCount = (session.participants || []).length;
     node.querySelector(".chip-people").textContent = participantCount + (participantCount === 1 ? " person" : " people");
 
-    const transfers = SplitLogic.computeSettlement(session);
     const badge = node.querySelector(".badge");
-    if (transfers.length === 0 && participantCount > 0) {
-      badge.textContent = "settled";
-    } else if (transfers.length > 0) {
-      badge.textContent = transfers.length + " transfer" + (transfers.length === 1 ? "" : "s") + " needed";
+    if (session.cancelled) {
+      badge.textContent = "cancelled";
+      badge.classList.add("badge-cancelled");
     } else {
-      badge.textContent = "no one joined yet";
+      const transfers = SplitLogic.computeSettlement(session);
+      if (transfers.length === 0 && participantCount > 0) {
+        badge.textContent = "settled";
+      } else if (transfers.length > 0) {
+        badge.textContent = transfers.length + " transfer" + (transfers.length === 1 ? "" : "s") + " needed";
+      } else {
+        badge.textContent = "no one joined yet";
+      }
     }
     return node;
   }
 
   // ---------------------------------------------------------------
-  // New session form
+  // New / edit session form (same form either way — editing just
+  // prefills it and updates the existing doc instead of creating one)
   // ---------------------------------------------------------------
   function renderNewSession() {
+    renderSessionForm(null);
+  }
+
+  function renderEditSession(sessionId) {
+    if (!currentUser) return;
+    db.collection("sessions").doc(sessionId).get().then(function (doc) {
+      if (!doc.exists) {
+        appEl.innerHTML = '<div class="error-banner">Session not found.</div><a href="#/">&larr; Back</a>';
+        return;
+      }
+      const session = Object.assign({ id: doc.id }, doc.data());
+      if (session.createdByUid !== currentUser.uid) {
+        // Not yours to edit — bounce back to the read-only detail view.
+        window.location.hash = "#/session/" + encodeURIComponent(sessionId);
+        return;
+      }
+      renderSessionForm(session);
+    }).catch(function (err) {
+      console.error(err);
+      appEl.innerHTML = '<div class="error-banner">Could not load session: ' + escapeHtml(err.message) + "</div>";
+    });
+  }
+
+  function renderSessionForm(existingSession) {
     const tpl = document.getElementById("tpl-new-session");
     appEl.innerHTML = "";
     appEl.appendChild(tpl.content.cloneNode(true));
 
+    appEl.querySelector(".panel-header h2").textContent = existingSession ? "Edit session" : "New session";
+    if (existingSession) {
+      appEl.querySelector(".back").href = "#/session/" + encodeURIComponent(existingSession.id);
+    }
+
     const payersList = document.getElementById("payers-list");
     const addPayerBtn = document.getElementById("add-payer-btn");
     const form = document.getElementById("new-session-form");
+    const submitBtn = form.querySelector('button[type="submit"]');
+    submitBtn.textContent = existingSession ? "Save changes" : "Create session";
 
-    function addPayerRow() {
+    function addPayerRow(prefill) {
       const tpl2 = document.getElementById("tpl-payer-row");
       const node = tpl2.content.cloneNode(true);
+      if (prefill) {
+        node.querySelector(".payer-name").value = prefill.name;
+        node.querySelector(".payer-amount").value = prefill.amount;
+      }
       node.querySelector(".remove-payer-btn").addEventListener("click", function (e) {
         e.target.closest(".payer-row").remove();
       });
       payersList.appendChild(node);
     }
-    addPayerBtn.addEventListener("click", addPayerRow);
-    addPayerRow();
+    addPayerBtn.addEventListener("click", function () { addPayerRow(); });
 
-    form.querySelector('[name="date"]').value = new Date().toISOString().slice(0, 10);
+    if (existingSession) {
+      form.querySelector('[name="date"]').value = existingSession.date;
+      form.querySelector('[name="location"]').value = existingSession.location || "";
+      form.querySelector('[name="courtCost"]').value = existingSession.courtCost;
+      form.querySelector('[name="notes"]').value = existingSession.notes || "";
+      const existingPayers = existingSession.payers || [];
+      if (existingPayers.length) {
+        existingPayers.forEach(function (p) { addPayerRow({ name: p.name, amount: p.amountPaid }); });
+      } else {
+        addPayerRow();
+      }
+    } else {
+      form.querySelector('[name="date"]').value = new Date().toISOString().slice(0, 10);
+      addPayerRow();
+    }
 
     form.addEventListener("submit", function (e) {
       e.preventDefault();
-      const submitBtn = form.querySelector('button[type="submit"]');
       submitBtn.disabled = true;
 
       const fd = new FormData(form);
@@ -486,22 +543,22 @@
           const payers = players.map(function (player, i) {
             return { playerId: player.id, name: player.name, amountPaid: payerInputs[i].amount };
           });
-          return db.collection("sessions").add({
-            date: date,
-            location: location,
-            courtCost: courtCost,
-            notes: notes,
-            payers: payers,
+          const sessionData = { date: date, location: location, courtCost: courtCost, notes: notes, payers: payers };
+          if (existingSession) {
+            return db.collection("sessions").doc(existingSession.id).update(sessionData)
+              .then(function () { return { id: existingSession.id }; });
+          }
+          return db.collection("sessions").add(Object.assign({}, sessionData, {
             createdByUid: currentUser.uid,
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          });
+          }));
         })
         .then(function (ref) {
           window.location.hash = "#/session/" + encodeURIComponent(ref.id);
         })
         .catch(function (err) {
           console.error(err);
-          alert("Could not create session: " + err.message);
+          alert("Could not " + (existingSession ? "save changes" : "create session") + ": " + err.message);
           submitBtn.disabled = false;
         });
     });
@@ -549,6 +606,44 @@
     const notesEl = appEl.querySelector(".session-notes");
     notesEl.textContent = session.notes || "";
     notesEl.style.display = session.notes ? "" : "none";
+
+    appEl.querySelector("#cancelled-banner").hidden = !session.cancelled;
+
+    const actionsEl = appEl.querySelector("#session-actions");
+    actionsEl.innerHTML = "";
+    if (currentUser && session.createdByUid === currentUser.uid) {
+      const editLink = document.createElement("a");
+      editLink.id = "edit-session-link";
+      editLink.className = "btn btn-secondary btn-small";
+      editLink.href = "#/session/" + encodeURIComponent(session.id) + "/edit";
+      editLink.textContent = "Edit";
+      actionsEl.appendChild(editLink);
+
+      const btn = document.createElement("button");
+      btn.id = "session-toggle-btn";
+      btn.className = "btn btn-secondary btn-small";
+      if (session.cancelled) {
+        btn.textContent = "Reopen session";
+        btn.addEventListener("click", function () {
+          btn.disabled = true;
+          reopenSession(session.id).catch(function (err) {
+            console.error(err);
+            alert("Could not reopen session: " + err.message);
+          });
+        });
+      } else {
+        btn.textContent = "Cancel session";
+        btn.addEventListener("click", function () {
+          if (!confirm("Cancel this session? Everyone will see it as cancelled, but it stays on record and can be reopened.")) return;
+          btn.disabled = true;
+          cancelSession(session.id).catch(function (err) {
+            console.error(err);
+            alert("Could not cancel session: " + err.message);
+          });
+        });
+      }
+      actionsEl.appendChild(btn);
+    }
 
     const costPerPerson = SplitLogic.computeCostPerPerson(session);
     appEl.querySelector(".stat-cost").textContent = "£" + money(session.courtCost);
@@ -610,6 +705,8 @@
           alert("Could not withdraw: " + err.message);
         });
       });
+    } else if (session.cancelled) {
+      joinArea.innerHTML = '<p class="joined-note">This session has been cancelled — you can\'t join it.</p>';
     } else {
       joinArea.innerHTML = '<button id="join-btn" class="btn btn-primary">Join as ' + escapeHtml(currentPlayer.name) + "</button>";
       document.getElementById("join-btn").addEventListener("click", function () {
@@ -654,6 +751,16 @@
       payInfoEl.textContent = toPlayer && toPlayer.paymentInfo ? "Pay " + t.to + " via: " + toPlayer.paymentInfo : "";
       container.appendChild(node);
     });
+  }
+
+  function cancelSession(sessionId) {
+    if (!currentUser) return Promise.reject(new Error("Not signed in"));
+    return db.collection("sessions").doc(sessionId).update({ cancelled: true });
+  }
+
+  function reopenSession(sessionId) {
+    if (!currentUser) return Promise.reject(new Error("Not signed in"));
+    return db.collection("sessions").doc(sessionId).update({ cancelled: false });
   }
 
   function joinSession(sessionId) {
