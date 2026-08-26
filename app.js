@@ -595,7 +595,21 @@
     if (!currentPlayer) {
       joinArea.innerHTML = "";
     } else if (alreadyIn) {
-      joinArea.innerHTML = '<p class="joined-note">✓ You\'re in this session as <strong>' + escapeHtml(currentPlayer.name) + "</strong>.</p>";
+      joinArea.innerHTML =
+        '<p class="joined-note">✓ You\'re in this session as <strong>' + escapeHtml(currentPlayer.name) + "</strong>.</p>" +
+        '<button id="withdraw-btn" class="btn btn-secondary btn-small">Withdraw</button>';
+      document.getElementById("withdraw-btn").addEventListener("click", function () {
+        const me = session.participants.find(function (p) { return p.playerId === currentPlayer.id; });
+        const warning = me && me.hasSettled
+          ? "You've marked yourself as paid for this session. Withdrawing removes you from the split — are you sure?"
+          : "Withdraw from this session? You'll no longer be included in the cost split.";
+        if (!confirm(warning)) return;
+        this.disabled = true;
+        withdrawFromSession(session.id).catch(function (err) {
+          console.error(err);
+          alert("Could not withdraw: " + err.message);
+        });
+      });
     } else {
       joinArea.innerHTML = '<button id="join-btn" class="btn btn-primary">Join as ' + escapeHtml(currentPlayer.name) + "</button>";
       document.getElementById("join-btn").addEventListener("click", function () {
@@ -654,6 +668,11 @@
         joinedAt: firebase.firestore.FieldValue.serverTimestamp(),
       });
     });
+  }
+
+  function withdrawFromSession(sessionId) {
+    if (!currentPlayer) return Promise.reject(new Error("Not signed in"));
+    return db.collection("sessions").doc(sessionId).collection("participants").doc(currentPlayer.id).delete();
   }
 
   function toggleMySettled(sessionId, hasSettled) {

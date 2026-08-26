@@ -106,6 +106,12 @@
         notifyDoc(path, id);
         return Promise.resolve();
       },
+      delete: function () {
+        delete bucket(path).data[id];
+        notifyCollection(path);
+        notifyDoc(path, id);
+        return Promise.resolve();
+      },
       onSnapshot: function (cb) {
         if (!bucket(path).l.docs[id]) bucket(path).l.docs[id] = [];
         bucket(path).l.docs[id].push(cb);

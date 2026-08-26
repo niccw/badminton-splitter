@@ -69,10 +69,29 @@ a:hover { text-decoration: underline; }
 .signin-panel { text-align: center; }
 .signin-panel p { color: var(--muted); }
 
+.gsi-button {
+  display: inline-block;
+  padding: 0;
+  border: none;
+  background: none;
+  line-height: 0;
+  cursor: pointer;
+  border-radius: 4px;
+}
+.gsi-button:hover { opacity: 0.92; }
+.gsi-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.gsi-button-img { display: block; height: 40px; width: auto; }
+.gsi-button-img-dark { display: none; }
+@media (prefers-color-scheme: dark) {
+  .gsi-button-img-light { display: none; }
+  .gsi-button-img-dark { display: block; }
+}
+
 .settled-status { font-size: 0.82rem; color: var(--muted); white-space: nowrap; }
 .settled-status.is-paid { color: var(--primary-dark); font-weight: 600; }
 
-.joined-note { color: var(--muted); font-size: 0.9rem; }
+.join-area { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.joined-note { color: var(--muted); font-size: 0.9rem; margin: 0; }
 
 .app {
   max-width: 720px;

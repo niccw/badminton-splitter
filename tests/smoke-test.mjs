@@ -134,6 +134,20 @@ await myCheckbox.check();
 await page.waitForTimeout(300);
 check("my settled checkbox stays checked after the round-trip update", await myCheckbox.isChecked());
 
+// Withdraw from the session: confirm dialog, then I drop out of the
+// participant list and the "Join" button reappears in my place.
+page.once("dialog", (dialog) => {
+  check("withdraw shows a confirmation dialog mentioning I've already paid", dialog.message().includes("paid"));
+  dialog.accept();
+});
+await page.click("#withdraw-btn");
+await page.waitForFunction(() => document.getElementById("participant-list").children.length <= 9, { timeout: 5000 });
+check("withdrawing drops the participant count back to 9", (await page.locator(".participant-row").count()) === 9);
+check("cost per person recomputes to £11.11 (100 / 9) after withdrawing",
+  (await page.textContent(".stat-per-person")).includes("11.11"));
+await page.waitForSelector("#join-btn", { timeout: 5000 });
+check("the Join button reappears after withdrawing", true);
+
 // Editing payment info via the header control (native prompt dialog).
 page.once("dialog", (dialog) => dialog.accept("new-handle@example"));
 await page.click("#edit-payinfo-btn");
