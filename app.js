@@ -7,18 +7,25 @@
  * Identity model: every visitor must sign in with Google. On first
  * sign-in they claim (or create) a "player" record — that's their
  * identity in the group from then on. You can only join sessions as
- * yourself, and only toggle your own "paid" status; this is enforced
- * both here and, more importantly, in firestore.rules (client-side
- * checks are for UX, the rules are what actually protects the data).
+ * yourself, and only toggle your own "paid" status — unless you're an
+ * admin (see /admins/{uid} in firestore.rules, console-managed only),
+ * who can mark anyone paid or remove anyone from a session, and is the
+ * only one who can publish a session's settle-up result. This is
+ * enforced both here and, more importantly, in firestore.rules
+ * (client-side checks are for UX, the rules are what actually protect
+ * the data).
  *
  * Data model:
  *   players/{playerId}            { name, paymentInfo, uid, createdAt }
  *   sessions/{sessionId}          { date, location, courtCost, notes,
  *                                    payers: [{playerId,name,amountPaid}],
- *                                    createdByUid, createdAt }
+ *                                    createdByUid, createdAt,
+ *                                    cancelled, settlementCalculated,
+ *                                    settlementCalculatedAt }
  *   sessions/{id}/participants/{playerId}
  *                                  { playerId, name, hasSettled, joinedAt }
  *     (doc id == playerId, so security rules can check "is this your row")
+ *   admins/{uid}                  { isAdmin: true } — console-managed only
  */
 (function () {
   "use strict";
@@ -35,8 +42,10 @@
   let currentUser = null; // Firebase Auth user
   let currentPlayer = null; // { id, name, paymentInfo, uid }
   let allPlayers = []; // live cache of the whole players collection
+  let isAdminUser = false; // set from /admins/{uid} — console-managed, not settable in-app
 
   let unsubscribePlayers = null;
+  let unsubscribeAdmin = null;
   let unsubscribeSessionList = null;
   let unsubscribeSessionDetail = null;
   let unsubscribeParticipants = null;
@@ -78,6 +87,14 @@
     if (isNaN(d.getTime())) return iso;
     return d.toLocaleDateString(undefined, { weekday: "short", year: "numeric", month: "short", day: "numeric" });
   }
+  // Handles both a real Firestore Timestamp (.toDate()) and a plain
+  // ISO string (e.g. the test stub's serverTimestamp()).
+  function formatDateTime(value) {
+    if (!value) return "";
+    const d = typeof value.toDate === "function" ? value.toDate() : new Date(value);
+    if (isNaN(d.getTime())) return "";
+    return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  }
   function escapeHtml(s) {
     const div = document.createElement("div");
     div.textContent = s == null ? "" : String(s);
@@ -98,6 +115,7 @@
 
       if (!user) {
         currentPlayer = null;
+        isAdminUser = false;
         paintAccountArea();
         renderSignIn();
         return;
@@ -106,12 +124,28 @@
       resolveMyPlayer(user).then(function () {
         paintAccountArea();
         startPlayersListener();
+        startAdminListener(user.uid);
         router();
       }).catch(function (err) {
         console.error(err);
         appEl.innerHTML = '<div class="error-banner">Could not set up your account: ' + escapeHtml(err.message) + "</div>";
       });
     });
+  }
+
+  // isAdminUser is console-managed (see firestore.rules) — this just
+  // mirrors it for the UI so admin-only controls light up live if it's
+  // toggled while the app is open, without needing a reload.
+  function startAdminListener(uid) {
+    if (!db) return;
+    unsubscribeAdmin = db.collection("admins").doc(uid).onSnapshot(
+      function (doc) {
+        isAdminUser = doc.exists && doc.data().isAdmin === true;
+        paintAccountArea();
+        if (latestSession) paintSessionDetail();
+      },
+      function (err) { console.error("admin listener error", err); }
+    );
   }
 
   function paintAccountArea() {
@@ -121,6 +155,7 @@
     }
     accountEl.innerHTML =
       '<span class="account-name">' + escapeHtml(currentPlayer.name) + "</span>" +
+      (isAdminUser ? '<span class="admin-badge">admin</span>' : "") +
       '<button id="edit-payinfo-btn" class="btn btn-secondary btn-small">' +
       (currentPlayer.paymentInfo ? "pay: " + escapeHtml(currentPlayer.paymentInfo) : "set payment info") +
       "</button>" +
@@ -349,6 +384,7 @@
     teardownSessionDetail();
     teardownHomeParticipantListeners();
     if (unsubscribePlayers) { unsubscribePlayers(); unsubscribePlayers = null; }
+    if (unsubscribeAdmin) { unsubscribeAdmin(); unsubscribeAdmin = null; }
   }
 
   function renderConfigNeeded() {
@@ -670,10 +706,10 @@
       tags.textContent = payerIds.indexOf(p.playerId) !== -1 ? "booked the court" : "";
 
       const isMe = currentPlayer && p.playerId === currentPlayer.id;
-      if (isMe) {
+      if (isMe || isAdminUser) {
         const cb = node.querySelector(".settled-checkbox");
         cb.checked = !!p.hasSettled;
-        cb.addEventListener("change", function () { toggleMySettled(session.id, cb.checked); });
+        cb.addEventListener("change", function () { setParticipantSettled(session.id, p.playerId, cb.checked); });
       } else {
         const toggleLabel = node.querySelector(".settled-toggle");
         const span = document.createElement("span");
@@ -681,6 +717,23 @@
         span.textContent = p.hasSettled ? "paid ✓" : "not paid yet";
         toggleLabel.replaceWith(span);
       }
+
+      if (isAdminUser && !isMe) {
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "btn btn-icon remove-participant-btn";
+        removeBtn.title = "Remove (admin)";
+        removeBtn.textContent = "✕";
+        removeBtn.addEventListener("click", function () {
+          if (!confirm("Remove " + p.name + " from this session? (admin action)")) return;
+          removeParticipant(session.id, p.playerId).catch(function (err) {
+            console.error(err);
+            alert("Could not remove participant: " + err.message);
+          });
+        });
+        node.querySelector(".participant-controls").appendChild(removeBtn);
+      }
+
       listEl.appendChild(node);
     });
 
@@ -718,15 +771,55 @@
       });
     }
 
-    // Settle up
-    const settleBtn = document.getElementById("settle-btn");
+    // Settle up — only an admin can publish the result; everyone else
+    // just sees it once it's there (or a "not yet" placeholder).
+    const settleControls = document.getElementById("settle-controls");
     const settleResult = document.getElementById("settle-result");
-    settleBtn.onclick = function () { renderSettlement(session, settleResult); };
-    if (settleResult.dataset.shown === "1") renderSettlement(session, settleResult);
+    settleControls.innerHTML = "";
+
+    if (session.settlementCalculated) {
+      if (isAdminUser) {
+        const when = formatDateTime(session.settlementCalculatedAt);
+        const note = document.createElement("span");
+        note.className = "settle-note";
+        note.textContent = when ? "Calculated " + when : "Calculated";
+        settleControls.appendChild(note);
+
+        const resetBtn = document.createElement("button");
+        resetBtn.id = "reset-settle-btn";
+        resetBtn.className = "btn btn-secondary btn-small";
+        resetBtn.textContent = "Reset";
+        resetBtn.addEventListener("click", function () {
+          if (!confirm("Hide the settle-up result again? You can recalculate any time.")) return;
+          resetSettlement(session.id).catch(function (err) {
+            console.error(err);
+            alert("Could not reset: " + err.message);
+          });
+        });
+        settleControls.appendChild(resetBtn);
+      }
+      renderSettlement(session, settleResult);
+    } else if (isAdminUser) {
+      const calcBtn = document.createElement("button");
+      calcBtn.id = "settle-btn";
+      calcBtn.className = "btn btn-secondary";
+      calcBtn.textContent = "Calculate transfers";
+      calcBtn.addEventListener("click", function () {
+        calcBtn.disabled = true;
+        calculateSettlement(session.id).catch(function (err) {
+          console.error(err);
+          alert("Could not calculate transfers: " + err.message);
+          calcBtn.disabled = false;
+        });
+      });
+      settleControls.appendChild(calcBtn);
+      settleResult.innerHTML = '<p class="settle-empty">Not calculated yet — click "Calculate transfers" once everyone’s in.</p>';
+    } else {
+      settleResult.innerHTML = '<p class="settle-empty">The organiser hasn’t calculated the settle-up yet.</p>';
+    }
   }
 
   function renderSettlement(session, container) {
-    container.dataset.shown = "1";
     const transfers = SplitLogic.computeSettlement(session);
     const playerById = {};
     allPlayers.forEach(function (p) { playerById[p.id] = p; });
@@ -763,6 +856,19 @@
     return db.collection("sessions").doc(sessionId).update({ cancelled: false });
   }
 
+  function calculateSettlement(sessionId) {
+    if (!currentUser) return Promise.reject(new Error("Not signed in"));
+    return db.collection("sessions").doc(sessionId).update({
+      settlementCalculated: true,
+      settlementCalculatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+  }
+
+  function resetSettlement(sessionId) {
+    if (!currentUser) return Promise.reject(new Error("Not signed in"));
+    return db.collection("sessions").doc(sessionId).update({ settlementCalculated: false });
+  }
+
   function joinSession(sessionId) {
     if (!currentPlayer) return Promise.reject(new Error("Not signed in"));
     const ref = db.collection("sessions").doc(sessionId).collection("participants").doc(currentPlayer.id);
@@ -779,12 +885,15 @@
 
   function withdrawFromSession(sessionId) {
     if (!currentPlayer) return Promise.reject(new Error("Not signed in"));
-    return db.collection("sessions").doc(sessionId).collection("participants").doc(currentPlayer.id).delete();
+    return removeParticipant(sessionId, currentPlayer.id);
   }
 
-  function toggleMySettled(sessionId, hasSettled) {
-    if (!currentPlayer) return;
-    return db.collection("sessions").doc(sessionId).collection("participants").doc(currentPlayer.id)
+  function removeParticipant(sessionId, playerId) {
+    return db.collection("sessions").doc(sessionId).collection("participants").doc(playerId).delete();
+  }
+
+  function setParticipantSettled(sessionId, playerId, hasSettled) {
+    return db.collection("sessions").doc(sessionId).collection("participants").doc(playerId)
       .update({ hasSettled: hasSettled })
       .catch(function (err) {
         console.error(err);

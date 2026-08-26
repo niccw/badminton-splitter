@@ -164,7 +164,7 @@
       <div class="panel-subsection">
         <div class="panel-header">
           <h3>Settle up</h3>
-          <button id="settle-btn" class="btn btn-secondary">Calculate transfers</button>
+          <div id="settle-controls" class="settle-controls"></div>
         </div>
         <div id="settle-result" class="settle-result"></div>
       </div>
@@ -175,10 +175,12 @@
     <li class="participant-row">
       <span class="participant-name"></span>
       <span class="participant-tags"></span>
-      <label class="settled-toggle">
-        <input type="checkbox" class="settled-checkbox" />
-        paid
-      </label>
+      <span class="participant-controls">
+        <label class="settled-toggle">
+          <input type="checkbox" class="settled-checkbox" />
+          paid
+        </label>
+      </span>
     </li>
   </template>
 

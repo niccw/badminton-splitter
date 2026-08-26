@@ -117,12 +117,45 @@ each person opens it, they'll sign in with Google and pick their name.
   themselves.
 - **Join session**: click **Join as \<your name\>** — you can only ever
   join as yourself, using the identity from your Google sign-in.
-- **Settle up**: once everyone's joined, hit **Calculate transfers** to
-  see exactly who should pay whom, and how much, along with each
-  recipient's saved payment info. Everyone can tick **paid** on their
-  own row once they've sent their transfer; you'll only see a checkbox
-  on your own row — everyone else's shows as plain "paid" / "not paid
-  yet" text, since only they can change their own status.
+- **Settle up**: only an admin sees a **Calculate transfers** button —
+  ideally clicked once the session's actually happened, so who did and
+  didn't show up is settled. Once they hit it, everyone sees exactly
+  who should pay whom, and how much, along with each recipient's saved
+  payment info; regular members just see "not calculated yet" until
+  then. An admin can **Reset** it to hide the result again (e.g. if
+  someone still needs to join). Everyone can tick **paid** on their own
+  row once they've sent their transfer; you'll only see a checkbox on
+  your own row — everyone else's shows as plain "paid" / "not paid yet"
+  text, since only they can change their own status (unless you're an
+  admin — see below).
+- **Withdraw / cancel / edit**: if you joined a session but can't make
+  it, **Withdraw** from your own row. Whoever created a session can
+  **Edit** its details (date, venue, cost, who paid what) or **Cancel**
+  it — cancelling just marks it cancelled and keeps it on record; it
+  can be reopened.
+
+### Admins
+
+There's an optional admin role for group organisers who need to fix
+things on other people's behalf — e.g. marking someone paid after
+they Venmo'd you in person, or removing a no-show who said they were
+in but never actually joined. Admins can tick **paid** and remove
+participants for *anyone*, not just themselves, and are the only ones
+who can calculate (or reset) a session's settle-up result.
+
+There's no in-app way to become an admin or grant it to someone else —
+it's entirely managed by hand in the Firebase console, on purpose,
+so it can't be self-escalated from the app:
+
+1. Find the person's uid — either the **Authentication** tab's user
+   list, or the `uid` field on their `players` doc in **Firestore
+   Data**.
+2. In **Firestore Data**, create a collection named `admins` (if it
+   doesn't exist yet) and add a document whose **document ID** is that
+   uid, with a single field `isAdmin` (boolean) set to `true`.
+3. They'll see an "admin" badge next to their name next time the app
+   syncs (usually instantly, no reload needed). To revoke, flip
+   `isAdmin` to `false` or delete the document.
 
 ## A couple of things worth knowing
 
@@ -133,9 +166,11 @@ each person opens it, they'll sign in with Google and pick their name.
 - Being signed in with Google doesn't give anyone extra power over
   other people's data — the Firestore rules restrict every write to
   "your own player profile" and "your own row in a session," regardless
-  of who's asking. The one shared, unrestricted action is creating a
-  session and recording who paid for the booking, since that's usually
-  the organiser noting a fact on someone else's behalf.
+  of who's asking, with two exceptions: creating a session and
+  recording who paid for the booking is unrestricted (that's usually
+  the organiser noting a fact on someone else's behalf), and admins
+  (console-managed only, see above) can mark anyone paid or remove
+  anyone from a session.
 - The Firebase free tier comfortably covers a group this size (tens of
   thousands of reads/writes per day, 1GB storage) and doesn't expire or
   pause itself from inactivity. Google sign-in is also free with no

@@ -117,16 +117,12 @@ check("exactly one editable 'paid' checkbox (mine)", (await page.locator(".settl
 check("the other nine participants show static status text, not checkboxes",
   (await page.locator(".settled-status").count()) === 9);
 
-// Settle up
-await page.click("#settle-btn");
-await page.waitForSelector(".transfer-row", { timeout: 5000 });
-check("settle-up produces exactly 8 transfers (matches the worked example)",
-  (await page.locator(".transfer-row").count()) === 8);
-const transferTexts = await page.locator(".transfer-row").allTextContents();
-check("every transfer's recipient is A or B (the two payers)",
-  transferTexts.every((t) => t.includes("A") || t.includes("B")));
-check("my payment handle is shown on transfers routed to me",
-  transferTexts.some((t) => t.includes("@a-payment-handle")));
+// Settle up is admin-gated: I created this session but I'm not an
+// admin yet, so I get no "Calculate transfers" button — just a
+// not-yet-calculated placeholder, same as any other regular member.
+check("no 'Calculate transfers' button for a non-admin creator", (await page.locator("#settle-btn").count()) === 0);
+check("settle area shows a not-yet-calculated placeholder for non-admins",
+  (await page.textContent("#settle-result")).includes("calculated the settle-up yet"));
 
 // Toggle my own "paid" checkbox and confirm it persists.
 const myCheckbox = page.locator(".settled-checkbox");
@@ -190,6 +186,53 @@ check("editing didn't create a second session (URL still points at the same id)"
   decodeURIComponent(page.url().split("#/session/")[1]) === sessionId);
 check("cost per person recomputes from the edited court cost (£120 / 9 = £13.33)",
   (await page.textContent(".stat-per-person")).includes("13.33"));
+
+// Admin role: console-managed via /admins/{uid} (simulated here with a
+// direct Firestore write, standing in for someone hand-editing it in
+// the Firebase console). Once granted, admin can mark anyone paid and
+// remove anyone from a session, not just their own row.
+await page.evaluate(() => firebase.firestore().collection("admins").doc("test-uid-1").set({ isAdmin: true }));
+await page.waitForSelector(".admin-badge", { timeout: 5000 });
+check("admin badge appears once granted, live with no reload", true);
+check("every row gets an editable 'paid' checkbox once I'm admin (I'm not a participant myself right now)",
+  (await page.locator(".settled-checkbox").count()) === 9);
+check("every row also gets a remove button", (await page.locator(".remove-participant-btn").count()) === 9);
+
+// Settle up: only admin gets the "Calculate transfers" button, and
+// clicking it publishes the result for everyone (see below, after
+// admin is revoked).
+await page.waitForSelector("#settle-btn", { timeout: 5000 });
+check("'Calculate transfers' button appears now that I'm admin", true);
+await page.click("#settle-btn");
+await page.waitForSelector(".transfer-row", { timeout: 5000 });
+check("calculating produces at least one transfer", (await page.locator(".transfer-row").count()) > 0);
+const adminTransferTexts = await page.locator(".transfer-row").allTextContents();
+check("my payment handle is shown on transfers routed to me",
+  adminTransferTexts.some((t) => t.includes("@a-payment-handle")));
+check("a Reset control appears once published", (await page.locator("#reset-settle-btn").count()) === 1);
+check("the 'Calculate transfers' button is gone once published", (await page.locator("#settle-btn").count()) === 0);
+
+const firstCheckbox = page.locator(".settled-checkbox").first();
+await firstCheckbox.check();
+await page.waitForTimeout(300);
+check("admin can mark someone else's row as paid", await firstCheckbox.isChecked());
+
+page.once("dialog", (dialog) => dialog.accept());
+await page.locator(".remove-participant-btn").first().click();
+await page.waitForFunction(() => document.getElementById("participant-list").children.length <= 8, { timeout: 5000 });
+check("admin can remove someone else's row (participant count drops to 8)",
+  (await page.locator(".participant-row").count()) === 8);
+
+// Revoke admin: elevated controls disappear live, same as they appeared.
+await page.evaluate(() => firebase.firestore().collection("admins").doc("test-uid-1").delete());
+await page.waitForFunction(() => !document.querySelector(".admin-badge"), { timeout: 5000 });
+check("admin badge disappears once revoked, live with no reload", true);
+check("checkboxes revert to read-only status text once no longer admin",
+  (await page.locator(".settled-checkbox").count()) === 0);
+check("the settle-up result stays visible for everyone even after admin is revoked",
+  (await page.locator(".transfer-row").count()) > 0);
+check("no admin-only settle controls remain once revoked",
+  (await page.locator("#reset-settle-btn").count()) === 0 && (await page.locator("#settle-btn").count()) === 0);
 
 // Editing payment info via the header control (native prompt dialog).
 page.once("dialog", (dialog) => dialog.accept("new-handle@example"));

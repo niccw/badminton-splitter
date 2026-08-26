@@ -7,10 +7,20 @@ rules_version = '2';
 //   - You can create/claim your own player profile, and edit only your
 //     own paymentInfo.
 //   - You can join a session only as yourself (participant doc id must
-//     be your own player id), and only toggle your own "hasSettled".
+//     be your own player id), and only toggle your own "hasSettled" —
+//     unless you're an admin, who can do both for anyone (see below).
 //   - Anyone signed in can create a session and record who paid for the
 //     booking (that's often the organiser noting facts about others,
 //     not a claim those people need to make themselves).
+//   - Only an admin can publish (or hide) a session's settle-up result;
+//     everyone else can only view it once published.
+//
+// Admins: membership lives in /admins/{uid} — a doc keyed by the
+// person's Firebase Auth uid with { isAdmin: true }. There is no
+// in-app way to grant it; add/remove/flip that doc by hand in the
+// Firebase console (Firestore Data tab -> admins collection). The
+// user's uid is visible on their player doc, or in the Authentication
+// tab's user list.
 //
 // This is what actually protects the data — the firebaseConfig object
 // in your deployed site is not a secret and can't be hidden from a
@@ -18,6 +28,18 @@ rules_version = '2';
 // ---------------------------------------------------------------------
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    function isAdmin() {
+      return request.auth != null
+             && exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+             && get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    // Console-managed only — nobody can grant themselves admin from the app.
+    match /admins/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow write: if false;
+    }
 
     match /players/{playerId} {
       allow read: if request.auth != null;
@@ -62,6 +84,14 @@ service cloud.firestore {
                     && request.resource.data.courtCost is number
                     && request.resource.data.courtCost >= 0;
 
+      // Admin-only: publish or hide the settle-up result. Deliberately
+      // narrower than the rule above — this doesn't require being the
+      // creator, but also can't touch anything except these two fields.
+      allow update: if request.auth != null
+                    && isAdmin()
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['settlementCalculated', 'settlementCalculatedAt']);
+
       allow delete: if false; // delete manually from the Firebase console if needed
 
       match /participants/{playerId} {
@@ -74,12 +104,18 @@ service cloud.firestore {
                       && request.resource.data.playerId == playerId;
 
         allow update: if request.auth != null
-                      && get(/databases/$(database)/documents/players/$(playerId)).data.uid == request.auth.uid
+                      && (
+                           get(/databases/$(database)/documents/players/$(playerId)).data.uid == request.auth.uid
+                           || isAdmin()
+                         )
                       && request.resource.data.playerId == resource.data.playerId
                       && request.resource.data.name == resource.data.name;
 
         allow delete: if request.auth != null
-                      && get(/databases/$(database)/documents/players/$(playerId)).data.uid == request.auth.uid;
+                      && (
+                           get(/databases/$(database)/documents/players/$(playerId)).data.uid == request.auth.uid
+                           || isAdmin()
+                         );
       }
     }
   }

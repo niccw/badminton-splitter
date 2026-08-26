@@ -65,6 +65,16 @@ a:hover { text-decoration: underline; }
 .topbar-right { display: flex; align-items: center; gap: 8px; }
 .account-area { display: flex; align-items: center; gap: 6px; }
 .account-name { font-weight: 600; font-size: 0.88rem; }
+.admin-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.15);
+  color: var(--accent);
+}
 
 .signin-panel { text-align: center; }
 .signin-panel p { color: var(--muted); }
@@ -245,6 +255,7 @@ a:hover { text-decoration: underline; }
 .participant-name { font-weight: 600; }
 .participant-tags { color: var(--muted); font-size: 0.8rem; flex: 1; text-align: right; margin-right: 8px; }
 .settled-toggle { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.participant-controls { display: flex; align-items: center; gap: 8px; }
 
 .join-form {
   display: flex;
@@ -284,6 +295,8 @@ a:hover { text-decoration: underline; }
 .transfer-payinfo { width: 100%; color: var(--muted); font-size: 0.8rem; }
 
 .settle-empty { color: var(--muted); font-size: 0.9rem; }
+.settle-controls { display: flex; align-items: center; gap: 10px; }
+.settle-note { color: var(--muted); font-size: 0.82rem; white-space: nowrap; }
 
 .footer {
   text-align: center;
