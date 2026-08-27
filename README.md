@@ -111,10 +111,11 @@ each person opens it, they'll sign in with Google and pick their name.
   link/handle, or leave it blank for now — editable any time from the
   header).
 - **New session**: record the date, venue, total court cost, and who
-  paid for the booking (and how much each of them paid). You can name
-  anyone here, whether or not they've signed in yet — this is the
-  organiser recording a fact, not a claim that person has to make
-  themselves.
+  paid for the booking (and how much each of them paid). Payers are
+  picked from a dropdown of the group's existing players, not typed —
+  this avoids creating duplicate near-matching names by typo. Someone
+  needs to have signed in at least once before they can be picked as a
+  payer.
 - **Join session**: click **Join as \<your name\>** — you can only ever
   join as yourself, using the identity from your Google sign-in.
 - **Settle up**: only an admin sees a **Calculate transfers** button —

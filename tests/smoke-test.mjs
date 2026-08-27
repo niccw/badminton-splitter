@@ -61,17 +61,23 @@ check("after profile setup, connects and shows the app", true);
 check("account area shows my name", (await page.textContent("#account-area")).includes("A"));
 check("account area shows my saved payment info", (await page.textContent("#account-area")).includes("@a-payment-handle"));
 
+// Payers are picked from existing players, not typed — so "B" needs to
+// already exist as a player before it can show up in that dropdown.
+await page.evaluate(() => firebase.firestore().collection("players").add({ name: "B", paymentInfo: "", uid: null }));
+
 // Create a session: courtCost 100, payer A paid 60 (me), payer B paid 40
 await page.goto("http://localhost:8981/index.html#/new");
 await page.fill('[name="location"]', "Test Sports Centre");
 await page.fill('[name="courtCost"]', "100");
 const payerRow1 = page.locator(".payer-row").first();
-await payerRow1.locator(".payer-name").fill("A");
+await payerRow1.locator(".payer-name").selectOption({ label: "A" });
 await payerRow1.locator(".payer-amount").fill("60");
 await page.click("#add-payer-btn");
 const payerRow2 = page.locator(".payer-row").nth(1);
-await payerRow2.locator(".payer-name").fill("B");
+await payerRow2.locator(".payer-name").selectOption({ label: "B" });
 await payerRow2.locator(".payer-amount").fill("40");
+check("payer select only offers existing players (no free-text option to invent a new one)",
+  (await payerRow2.locator(".payer-name option").allTextContents()).sort().join(",") === ["A", "B", "Select player…"].sort().join(","));
 await page.click('#new-session-form button[type="submit"]');
 
 await page.waitForSelector(".session-title:not(:has-text('Loading'))", { timeout: 5000 });
@@ -175,6 +181,8 @@ check("edit form heading says 'Edit session'", (await page.textContent(".panel-h
 check("edit form prefills the existing location", await page.inputValue('[name="location"]') === "Test Sports Centre");
 check("edit form prefills the existing court cost", await page.inputValue('[name="courtCost"]') === "100");
 check("edit form prefills both existing payer rows", (await page.locator(".payer-row").count()) === 2);
+check("edit form pre-selects the correct existing payer in each row",
+  (await page.locator(".payer-name").evaluateAll((els) => els.map((el) => el.selectedOptions[0]?.textContent))).sort().join(",") === "A,B");
 
 await page.fill('[name="location"]', "Updated Sports Centre");
 await page.fill('[name="courtCost"]', "120");

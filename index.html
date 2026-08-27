@@ -111,13 +111,13 @@
 
   <template id="tpl-payer-row">
     <div class="payer-row">
-      <input type="text" class="payer-name" list="player-names-datalist" placeholder="name" required />
+      <select class="payer-name" required>
+        <option value="" disabled selected>Select player…</option>
+      </select>
       <input type="number" class="payer-amount" min="0" step="0.01" placeholder="amount paid" required />
       <button type="button" class="btn btn-icon remove-payer-btn" title="Remove">✕</button>
     </div>
   </template>
-
-  <datalist id="player-names-datalist"></datalist>
 
   <template id="tpl-session-detail">
     <section class="panel">

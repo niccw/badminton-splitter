@@ -33,7 +33,6 @@
   const appEl = document.getElementById("app");
   const statusEl = document.getElementById("connection-status");
   const accountEl = document.getElementById("account-area");
-  const datalist = document.getElementById("player-names-datalist");
 
   let db = null;
   let auth = null;
@@ -287,15 +286,14 @@
   }
 
   // ---------------------------------------------------------------
-  // Player directory (for autocomplete on the "who paid" fields, and
-  // for looking up payment info when rendering settle-up results)
+  // Player directory (for the "who paid" selects, and for looking up
+  // payment info when rendering settle-up results)
   // ---------------------------------------------------------------
   function startPlayersListener() {
     if (!db || unsubscribePlayers) return;
     unsubscribePlayers = db.collection("players").onSnapshot(
       function (snap) {
         allPlayers = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
-        refreshDatalist();
         setStatus("connected", "live");
       },
       function (err) {
@@ -303,43 +301,6 @@
         setStatus("error", "connection error");
       }
     );
-  }
-
-  function refreshDatalist() {
-    datalist.innerHTML = "";
-    allPlayers
-      .slice()
-      .sort(function (a, b) { return a.name.localeCompare(b.name); })
-      .forEach(function (p) {
-        const opt = document.createElement("option");
-        opt.value = p.name;
-        datalist.appendChild(opt);
-      });
-  }
-
-  function findPlayerByName(name) {
-    const norm = name.trim().toLowerCase();
-    return allPlayers.find(function (p) { return p.name.trim().toLowerCase() === norm; });
-  }
-
-  /**
-   * Used only for the "who paid the booking" fields on session creation
-   * — those can name anyone in the group, whether or not that person
-   * has signed in yet. Creates an unclaimed placeholder if new.
-   */
-  function getOrCreatePlaceholderPlayer(name) {
-    name = (name || "").trim();
-    if (!name) return Promise.reject(new Error("Name is required"));
-    const existing = findPlayerByName(name);
-    if (existing) return Promise.resolve(existing);
-    return db.collection("players").add({
-      name: name,
-      paymentInfo: "",
-      uid: null,
-      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-    }).then(function (ref) {
-      return { id: ref.id, name: name, paymentInfo: "", uid: null };
-    });
   }
 
   // ---------------------------------------------------------------
@@ -518,11 +479,22 @@
     const submitBtn = form.querySelector('button[type="submit"]');
     submitBtn.textContent = existingSession ? "Save changes" : "Create session";
 
+    // Payers must already be registered players — picked from a select,
+    // not typed, so this can't create new (mistyped or duplicate) ones.
+    const sortedPlayers = allPlayers.slice().sort(function (a, b) { return a.name.localeCompare(b.name); });
+
     function addPayerRow(prefill) {
       const tpl2 = document.getElementById("tpl-payer-row");
       const node = tpl2.content.cloneNode(true);
+      const select = node.querySelector(".payer-name");
+      sortedPlayers.forEach(function (p) {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = p.name;
+        select.appendChild(opt);
+      });
       if (prefill) {
-        node.querySelector(".payer-name").value = prefill.name;
+        select.value = prefill.playerId;
         node.querySelector(".payer-amount").value = prefill.amount;
       }
       node.querySelector(".remove-payer-btn").addEventListener("click", function (e) {
@@ -539,7 +511,7 @@
       form.querySelector('[name="notes"]').value = existingSession.notes || "";
       const existingPayers = existingSession.payers || [];
       if (existingPayers.length) {
-        existingPayers.forEach(function (p) { addPayerRow({ name: p.name, amount: p.amountPaid }); });
+        existingPayers.forEach(function (p) { addPayerRow({ playerId: p.playerId, amount: p.amountPaid }); });
       } else {
         addPayerRow();
       }
@@ -558,37 +530,33 @@
       const courtCost = parseFloat(fd.get("courtCost"));
       const notes = (fd.get("notes") || "").trim();
 
-      const payerRows = Array.prototype.slice.call(payersList.querySelectorAll(".payer-row"));
-      const payerInputs = payerRows
-        .map(function (row) {
-          return {
-            name: row.querySelector(".payer-name").value.trim(),
-            amount: parseFloat(row.querySelector(".payer-amount").value),
-          };
-        })
-        .filter(function (p) { return p.name && !isNaN(p.amount); });
+      const playerById = {};
+      allPlayers.forEach(function (p) { playerById[p.id] = p; });
 
-      if (!payerInputs.length) {
+      const payerRows = Array.prototype.slice.call(payersList.querySelectorAll(".payer-row"));
+      const payers = payerRows
+        .map(function (row) {
+          const player = playerById[row.querySelector(".payer-name").value];
+          const amount = parseFloat(row.querySelector(".payer-amount").value);
+          return player && !isNaN(amount) ? { playerId: player.id, name: player.name, amountPaid: amount } : null;
+        })
+        .filter(Boolean);
+
+      if (!payers.length) {
         alert("Add at least one person who paid for the booking.");
         submitBtn.disabled = false;
         return;
       }
 
-      Promise.all(payerInputs.map(function (p) { return getOrCreatePlaceholderPlayer(p.name); }))
-        .then(function (players) {
-          const payers = players.map(function (player, i) {
-            return { playerId: player.id, name: player.name, amountPaid: payerInputs[i].amount };
-          });
-          const sessionData = { date: date, location: location, courtCost: courtCost, notes: notes, payers: payers };
-          if (existingSession) {
-            return db.collection("sessions").doc(existingSession.id).update(sessionData)
-              .then(function () { return { id: existingSession.id }; });
-          }
-          return db.collection("sessions").add(Object.assign({}, sessionData, {
+      const sessionData = { date: date, location: location, courtCost: courtCost, notes: notes, payers: payers };
+      const savePromise = existingSession
+        ? db.collection("sessions").doc(existingSession.id).update(sessionData).then(function () { return { id: existingSession.id }; })
+        : db.collection("sessions").add(Object.assign({}, sessionData, {
             createdByUid: currentUser.uid,
             createdAt: firebase.firestore.FieldValue.serverTimestamp(),
           }));
-        })
+
+      savePromise
         .then(function (ref) {
           window.location.hash = "#/session/" + encodeURIComponent(ref.id);
         })
