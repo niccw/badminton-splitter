@@ -82,7 +82,10 @@ service cloud.firestore {
                     && resource.data.createdByUid == request.auth.uid
                     && request.resource.data.createdByUid == resource.data.createdByUid
                     && request.resource.data.courtCost is number
-                    && request.resource.data.courtCost >= 0;
+                    && request.resource.data.courtCost >= 0
+                    && request.resource.data.keys().hasAll(['date', 'courtCost', 'payers'])
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['date', 'location', 'courtCost', 'notes', 'payers', 'cancelled']);
 
       // Admin-only: publish or hide the settle-up result. Deliberately
       // narrower than the rule above — this doesn't require being the
