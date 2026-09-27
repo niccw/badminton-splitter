@@ -39,7 +39,7 @@ check("shows setup-needed message with default REPLACE_ME config",
 // --- Test 2: full interactive flow against fake Auth + Firestore ---
 const fakeFirebaseSrc = fs.readFileSync(path.join(__dirname, "fake-firebase.js"), "utf8");
 await page.route("**/firebasejs/**", (route) => route.fulfill({ status: 200, contentType: "application/javascript", body: "" }));
-await page.route("**/firebase-config.js", (route) =>
+await page.route("**/firebase-config.js*", (route) =>
   route.fulfill({ status: 200, contentType: "application/javascript", body: 'const firebaseConfig = { apiKey: "test-key" };' })
 );
 await page.addInitScript({ content: fakeFirebaseSrc });
