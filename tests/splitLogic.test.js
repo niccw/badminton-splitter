@@ -144,4 +144,43 @@ check("payer who is not a participant (books court but doesn't play) still gets 
   transfers.forEach((t) => assert.strictEqual(t.to, "Organizer"));
 });
 
+console.log("computeOutstandingTransfers");
+check("drops transfers from participants who've marked themselves paid", () => {
+  const session = {
+    courtCost: 40,
+    payers: [{ playerId: "org", name: "Organizer", amountPaid: 40 }],
+    participants: [
+      { playerId: "p1", name: "P1", hasSettled: true },
+      { playerId: "p2", name: "P2", hasSettled: false },
+      { playerId: "p3", name: "P3" },
+      { playerId: "p4", name: "P4", hasSettled: true },
+    ],
+  };
+  const outstanding = SplitLogic.computeOutstandingTransfers(session);
+  assert.deepStrictEqual(outstanding.map((t) => t.fromId).sort(), ["p2", "p3"]);
+});
+check("a creditor ticking 'paid' doesn't clear what others owe them", () => {
+  const session = {
+    courtCost: 20,
+    payers: [{ playerId: "p1", name: "A", amountPaid: 20 }],
+    participants: [
+      { playerId: "p1", name: "A", hasSettled: true },
+      { playerId: "p2", name: "B", hasSettled: false },
+    ],
+  };
+  assert.strictEqual(SplitLogic.computeOutstandingTransfers(session).length, 1);
+});
+check("everyone paid => nothing outstanding", () => {
+  const session = {
+    courtCost: 20,
+    payers: [{ playerId: "p1", name: "A", amountPaid: 20 }],
+    participants: [
+      { playerId: "p1", name: "A" },
+      { playerId: "p2", name: "B", hasSettled: true },
+    ],
+  };
+  assert.strictEqual(SplitLogic.computeSettlement(session).length, 1);
+  assert.strictEqual(SplitLogic.computeOutstandingTransfers(session).length, 0);
+});
+
 console.log(`\n${passed} test(s) passed` + (process.exitCode ? ", some FAILED" : ""));
