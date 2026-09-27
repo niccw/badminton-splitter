@@ -155,9 +155,26 @@
     return transfers;
   }
 
+  /**
+   * The transfers from computeSettlement that are still waiting to be
+   * paid. A participant ticking "paid" (hasSettled) means they've paid
+   * their share, so every transfer *from* them is done — even when the
+   * greedy split routed their debt to more than one creditor.
+   */
+  function computeOutstandingTransfers(session) {
+    const settled = {};
+    (session.participants || []).forEach(function (p) {
+      if (p.hasSettled) settled[p.playerId] = true;
+    });
+    return computeSettlement(session).filter(function (t) {
+      return !settled[t.fromId];
+    });
+  }
+
   return {
     computeCostPerPerson: computeCostPerPerson,
     computeBalances: computeBalances,
     computeSettlement: computeSettlement,
+    computeOutstandingTransfers: computeOutstandingTransfers,
   };
 });

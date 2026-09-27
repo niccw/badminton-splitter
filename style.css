@@ -293,8 +293,32 @@ a:hover { text-decoration: underline; }
   color: var(--primary-dark);
 }
 .transfer-payinfo { width: 100%; color: var(--muted); font-size: 0.8rem; }
+.transfer-row.is-paid { opacity: 0.55; }
 
 .settle-empty { color: var(--muted); font-size: 0.9rem; }
+
+.payment-status-panel { margin-bottom: 16px; }
+.payment-status-group + .payment-status-group { margin-top: 16px; }
+.payment-status-group h3 { margin: 0 0 8px; font-size: 0.95rem; }
+.payment-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  color: var(--text);
+}
+.payment-status-row:hover { border-color: var(--accent); text-decoration: none; }
+.payment-status-who { font-weight: 600; }
+.payment-status-session { color: var(--muted); font-size: 0.85rem; }
+.payment-status-amount { margin-left: auto; font-weight: 700; }
+.payment-status-owe .payment-status-amount { color: var(--danger); }
+.payment-status-owed .payment-status-amount { color: var(--primary-dark); }
+.payment-status-payinfo { width: 100%; color: var(--muted); font-size: 0.8rem; }
+.payment-status-clear { margin: 0; font-weight: 600; color: var(--primary-dark); }
 .settle-controls { display: flex; align-items: center; gap: 10px; }
 .settle-note { color: var(--muted); font-size: 0.82rem; white-space: nowrap; }
 

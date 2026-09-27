@@ -49,6 +49,7 @@
   let unsubscribeSessionDetail = null;
   let unsubscribeParticipants = null;
   let homeParticipantUnsubs = {}; // sessionId -> unsubscribe fn
+  let homeSessions = {}; // sessionId -> session (+ participants once loaded), feeds the payment status panel
   let latestSession = null;
   let latestParticipants = [];
 
@@ -295,6 +296,7 @@
       function (snap) {
         allPlayers = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
         setStatus("connected", "live");
+        paintPaymentStatus();
       },
       function (err) {
         console.error("players listener error", err);
@@ -340,6 +342,7 @@
     if (unsubscribeSessionList) { unsubscribeSessionList(); unsubscribeSessionList = null; }
     Object.keys(homeParticipantUnsubs).forEach(function (id) { homeParticipantUnsubs[id](); });
     homeParticipantUnsubs = {};
+    homeSessions = {};
   }
   function teardownEverything() {
     teardownSessionDetail();
@@ -373,7 +376,10 @@
       function (snap) {
         if (snap.empty) {
           listEl.innerHTML = '<p class="empty-state">No sessions yet. Create your first one!</p>';
-          teardownHomeParticipantListeners();
+          Object.keys(homeParticipantUnsubs).forEach(function (id) { homeParticipantUnsubs[id](); });
+          homeParticipantUnsubs = {};
+          homeSessions = {};
+          paintPaymentStatus();
           return;
         }
         listEl.innerHTML = "";
@@ -381,6 +387,8 @@
         snap.docs.forEach(function (doc) {
           const session = Object.assign({ id: doc.id }, doc.data());
           seenIds[session.id] = true;
+          const prev = homeSessions[session.id];
+          homeSessions[session.id] = Object.assign({}, session, prev ? { participants: prev.participants } : {});
           const cardWrap = document.createElement("div");
           listEl.appendChild(cardWrap);
           attachHomeParticipantListener(session, cardWrap);
@@ -388,6 +396,10 @@
         Object.keys(homeParticipantUnsubs).forEach(function (id) {
           if (!seenIds[id]) { homeParticipantUnsubs[id](); delete homeParticipantUnsubs[id]; }
         });
+        Object.keys(homeSessions).forEach(function (id) {
+          if (!seenIds[id]) delete homeSessions[id];
+        });
+        paintPaymentStatus();
       },
       function (err) {
         console.error(err);
@@ -404,7 +416,93 @@
         const participants = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
         containerEl.innerHTML = "";
         containerEl.appendChild(renderSessionCard(Object.assign({}, session, { participants: participants })));
+        if (homeSessions[session.id]) {
+          homeSessions[session.id] = Object.assign({}, homeSessions[session.id], { participants: participants });
+          paintPaymentStatus();
+        }
       });
+  }
+
+  /**
+   * "Payment status" panel on the home page: across every live session
+   * whose settle-up has been published, list what I still owe (my
+   * transfers, while I haven't ticked "paid") and what's still owed to
+   * me (transfers to me from people who haven't ticked "paid").
+   */
+  function paintPaymentStatus() {
+    const el = document.getElementById("payment-status");
+    if (!el || !currentPlayer) return;
+
+    const sessions = Object.keys(homeSessions).map(function (id) { return homeSessions[id]; });
+    // Wait until every session's participants have loaded, otherwise
+    // we'd briefly flash "all settled" on first load.
+    if (sessions.some(function (s) { return !s.participants; })) {
+      el.innerHTML = '<p class="settle-empty">Loading…</p>';
+      return;
+    }
+
+    const playerById = {};
+    allPlayers.forEach(function (p) { playerById[p.id] = p; });
+
+    const iOwe = [];
+    const owedToMe = [];
+    sessions
+      .filter(function (s) { return !s.cancelled && s.settlementCalculated; })
+      .sort(function (a, b) { return (b.date || "").localeCompare(a.date || ""); })
+      .forEach(function (session) {
+        SplitLogic.computeOutstandingTransfers(session).forEach(function (t) {
+          if (t.fromId === currentPlayer.id) iOwe.push({ session: session, t: t });
+          else if (t.toId === currentPlayer.id) owedToMe.push({ session: session, t: t });
+        });
+      });
+
+    if (!iOwe.length && !owedToMe.length) {
+      el.innerHTML = '<p class="payment-status-clear">✅ All payment settled</p>';
+      return;
+    }
+
+    el.innerHTML = "";
+    function addGroup(title, items, kind) {
+      if (!items.length) return;
+      const total = items.reduce(function (sum, item) { return sum + item.t.amount; }, 0);
+      const group = document.createElement("div");
+      group.className = "payment-status-group payment-status-" + kind;
+      const h = document.createElement("h3");
+      h.textContent = title + " (£" + money(total) + ")";
+      group.appendChild(h);
+
+      items.forEach(function (item) {
+        const t = item.t;
+        const row = document.createElement("a");
+        row.className = "payment-status-row";
+        row.href = "#/session/" + encodeURIComponent(item.session.id);
+
+        const who = document.createElement("span");
+        who.className = "payment-status-who";
+        who.textContent = kind === "owe" ? "You → " + t.to : t.from + " → you";
+        const where = document.createElement("span");
+        where.className = "payment-status-session";
+        where.textContent = formatDate(item.session.date) + (item.session.location ? " · " + item.session.location : "");
+        const amount = document.createElement("span");
+        amount.className = "payment-status-amount";
+        amount.textContent = "£" + money(t.amount);
+        row.appendChild(who);
+        row.appendChild(where);
+        row.appendChild(amount);
+
+        const toPlayer = playerById[t.toId];
+        if (kind === "owe" && toPlayer && toPlayer.paymentInfo) {
+          const payInfo = document.createElement("span");
+          payInfo.className = "payment-status-payinfo";
+          payInfo.textContent = "Pay " + t.to + " via: " + toPlayer.paymentInfo;
+          row.appendChild(payInfo);
+        }
+        group.appendChild(row);
+      });
+      el.appendChild(group);
+    }
+    addGroup("Unpaid — you owe", iOwe, "owe");
+    addGroup("Unsettled — owed to you", owedToMe, "owed");
   }
 
   function renderSessionCard(session) {
@@ -423,7 +521,9 @@
       badge.textContent = "cancelled";
       badge.classList.add("badge-cancelled");
     } else {
-      const transfers = SplitLogic.computeSettlement(session);
+      // Only count transfers still outstanding — once someone ticks
+      // "paid", their transfers no longer need doing.
+      const transfers = SplitLogic.computeOutstandingTransfers(session);
       if (transfers.length === 0 && participantCount > 0) {
         badge.textContent = "settled";
       } else if (transfers.length > 0) {
@@ -800,6 +900,9 @@
       return;
     }
 
+    const settledIds = {};
+    session.participants.forEach(function (p) { if (p.hasSettled) settledIds[p.playerId] = true; });
+
     container.innerHTML = "";
     transfers.forEach(function (t) {
       const tpl = document.getElementById("tpl-settle-transfer");
@@ -810,6 +913,10 @@
       const toPlayer = playerById[t.toId];
       const payInfoEl = node.querySelector(".transfer-payinfo");
       payInfoEl.textContent = toPlayer && toPlayer.paymentInfo ? "Pay " + t.to + " via: " + toPlayer.paymentInfo : "";
+      if (settledIds[t.fromId]) {
+        node.querySelector(".transfer-row").classList.add("is-paid");
+        node.querySelector(".transfer-amount").textContent += " · paid ✓";
+      }
       container.appendChild(node);
     });
   }

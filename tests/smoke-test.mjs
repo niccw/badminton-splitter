@@ -58,6 +58,9 @@ await page.click('#profile-setup-form button[type="submit"]');
 
 await page.waitForSelector("#connection-status.status-connected", { timeout: 5000 });
 check("after profile setup, connects and shows the app", true);
+await page.waitForSelector(".payment-status-clear", { timeout: 5000 });
+check("payment status panel shows 'All payment settled' when there's nothing outstanding",
+  (await page.textContent("#payment-status")).includes("All payment settled"));
 check("account area shows my name", (await page.textContent("#account-area")).includes("A"));
 check("account area shows my saved payment info", (await page.textContent("#account-area")).includes("@a-payment-handle"));
 
@@ -241,6 +244,48 @@ check("the settle-up result stays visible for everyone even after admin is revok
   (await page.locator(".transfer-row").count()) > 0);
 check("no admin-only settle controls remain once revoked",
   (await page.locator("#reset-settle-btn").count()) === 0 && (await page.locator("#settle-btn").count()) === 0);
+
+// Home page: the "x transfers needed" badge only counts transfers from
+// people who haven't ticked "paid", and my payment status panel lists
+// what's still owed to me from the published settle-up.
+const outstandingCount = await page.evaluate(async (sessionId) => {
+  const db = firebase.firestore();
+  const parts = db.collection("sessions").doc(sessionId).collection("participants");
+  const firstUnpaid = (await parts.get()).docs.find((d) => !d.data().hasSettled);
+  await parts.doc(firstUnpaid.id).update({ hasSettled: true });
+  const sessionDoc = await db.collection("sessions").doc(sessionId).get();
+  const partsSnap = await db.collection("sessions").doc(sessionId).collection("participants").get();
+  const session = Object.assign({}, sessionDoc.data(), { participants: partsSnap.docs.map((d) => d.data()) });
+  return {
+    all: SplitLogic.computeSettlement(session).length,
+    outstanding: SplitLogic.computeOutstandingTransfers(session).length,
+  };
+}, sessionId);
+check("someone marked paid, so fewer transfers are outstanding than in the full settle-up",
+  outstandingCount.outstanding < outstandingCount.all);
+await page.goto("http://localhost:8981/index.html#/");
+await page.waitForSelector(".session-card .badge", { timeout: 5000 });
+check("home badge counts only outstanding transfers",
+  (await page.textContent(".session-card .badge")).startsWith(outstandingCount.outstanding + " transfer"));
+await page.waitForSelector(".payment-status-owed .payment-status-row", { timeout: 5000 });
+check("payment status panel lists what's still owed to me",
+  (await page.locator(".payment-status-owed .payment-status-row").count()) > 0 &&
+  (await page.textContent("#payment-status")).includes("owed to you"));
+check("payment status panel shows nothing I owe (I paid up front)",
+  (await page.locator(".payment-status-owe").count()) === 0);
+
+await page.evaluate(async (sessionId) => {
+  const db = firebase.firestore();
+  const partsSnap = await db.collection("sessions").doc(sessionId).collection("participants").get();
+  for (const d of partsSnap.docs) {
+    await db.collection("sessions").doc(sessionId).collection("participants").doc(d.id).update({ hasSettled: true });
+  }
+}, sessionId);
+await page.waitForSelector(".payment-status-clear", { timeout: 5000 });
+check("payment status flips to 'All payment settled' once everyone has paid",
+  (await page.textContent("#payment-status")).includes("All payment settled"));
+check("home badge shows 'settled' once everyone has paid",
+  (await page.textContent(".session-card .badge")) === "settled");
 
 // Editing payment info via the header control (native prompt dialog).
 page.once("dialog", (dialog) => dialog.accept("new-handle@example"));
